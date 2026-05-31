@@ -33,7 +33,13 @@ Para conversación, preguntas, análisis o consejos:
 {"text": "tu respuesta clara y natural", "action": null}
 
 Para reproducir una canción en Spotify:
-{"text": "Claro, te pongo [canción] de [artista] en Spotify.", "action": {"type": "spotify", "query": "[song name] [artist]"}}
+{"text": "Claro, te pongo [canción] de [artista] en Spotify.", "action": {"type": "spotify", "query": "[song name] [artist]", "target": "default"}}
+
+El campo "target" indica en qué dispositivo reproducir:
+- "default": sin dispositivo específico o solo dice "en Spotify" — reproduce donde haya algo activo.
+- "pc": dice "en la pc", "en la computadora", "en el escritorio", "en la laptop", "en linux", "en mac", "en windows".
+- "phone": dice "en mi celular", "en el teléfono", "en el móvil".
+- "tv": dice "en la tele", "en la sala", "en mi pantalla principal", "en el tv", "en la televisión", "en la samsung", "en la pantalla grande".
 
 Para buscar un video en YouTube:
 {"text": "Aquí tienes un video sobre [tema].", "action": {"type": "youtube", "query": "[search terms]"}}

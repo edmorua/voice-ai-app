@@ -5,6 +5,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 // ── Types ───────────────────────────────────────────────────────────────────
 
 type AppState = "idle" | "recording" | "processing" | "speaking";
+type SpotifyTarget = "default" | "pc" | "phone" | "tv";
 
 interface Message {
   role: "user" | "assistant";
@@ -237,6 +238,7 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [processingStep, setProcessingStep] = useState<string | null>(null);
+  const [spotifyConnected, setSpotifyConnected] = useState<boolean | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -257,6 +259,23 @@ export default function Home() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Check Spotify connection status + handle OAuth redirect params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const spotifyParam = params.get("spotify");
+    if (spotifyParam === "connected") {
+      setSpotifyConnected(true);
+      window.history.replaceState({}, "", "/");
+    } else if (spotifyParam === "error") {
+      setError("No se pudo conectar Spotify. Intenta de nuevo.");
+      window.history.replaceState({}, "", "/");
+    }
+    fetch("/api/spotify/status")
+      .then((r) => r.json())
+      .then(({ connected }) => setSpotifyConnected(connected))
+      .catch(() => setSpotifyConnected(false));
+  }, []);
 
   // Animate the wave bars with real audio data
   const startBarsAnimation = useCallback(() => {
@@ -426,10 +445,19 @@ export default function Home() {
 
       // ── 3. Ejecutar acción de Spotify o YouTube ──────────────────────────
       if (action?.type === "spotify" && action.query) {
-        fetch(`/api/spotify/search?q=${encodeURIComponent(action.query)}`)
+        fetch("/api/spotify/play", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: action.query,
+            target: (action.target as SpotifyTarget) ?? "default",
+          }),
+        })
           .then((r) => r.json())
-          .then(({ url }) => { if (url) window.open(url, "_blank"); })
-          .catch((e) => console.error("[spotify action]", e));
+          .then((data) => {
+            if (data.error) console.warn("[spotify play]", data.error);
+          })
+          .catch((e) => console.error("[spotify play]", e));
       } else if (action?.type === "youtube" && action.query) {
         fetch(`/api/youtube/search?q=${encodeURIComponent(action.query)}`)
           .then((r) => r.json())
@@ -529,6 +557,26 @@ export default function Home() {
           Sofia
         </h1>
       </header>
+
+      {/* ── Spotify connect badge ── */}
+      {spotifyConnected !== null && (
+        <div className="relative z-10 mb-6">
+          {spotifyConnected ? (
+            <div className="flex items-center gap-2 px-4 py-1.5 rounded-full glass border border-emerald-900/40 text-xs text-emerald-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Spotify conectado
+            </div>
+          ) : (
+            <a
+              href="/api/spotify/auth"
+              className="flex items-center gap-2 px-4 py-1.5 rounded-full glass border border-violet-900/40 text-xs text-violet-400 hover:border-violet-600/60 hover:text-violet-300 transition-colors"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+              Conectar Spotify
+            </a>
+          )}
+        </div>
+      )}
 
       {/* ── Main button + visualizer ── */}
       <div className="relative z-10 flex flex-col items-center gap-6 mb-6">
