@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getValidAccessToken } from "../tokens";
+import { savePlay } from "@/lib/db";
 
-type DeviceTarget = "default" | "pc" | "phone" | "tv";
+type DeviceTarget = "default" | "pc" | "mac" | "phone" | "tv";
 
 interface SpotifyDevice {
   id: string;
@@ -10,10 +11,18 @@ interface SpotifyDevice {
   is_active: boolean;
 }
 
+const isMac = (d: SpotifyDevice) =>
+  d.type === "Computer" && /mac|macbook|imac|mac\s*mini|mac\s*pro|mac\s*studio/i.test(d.name);
+
+const isPC = (d: SpotifyDevice) =>
+  d.type === "Computer" && !/mac|macbook|imac/i.test(d.name);
+
 function pickDevice(devices: SpotifyDevice[], target: DeviceTarget): SpotifyDevice | null {
   switch (target) {
+    case "mac":
+      return devices.find(isMac) ?? devices.find((d) => d.type === "Computer") ?? null;
     case "pc":
-      return devices.find((d) => d.type === "Computer") ?? null;
+      return devices.find(isPC) ?? devices.find((d) => d.type === "Computer") ?? null;
     case "phone":
       return devices.find((d) => d.type === "Smartphone") ?? null;
     case "tv":
@@ -29,9 +38,10 @@ function pickDevice(devices: SpotifyDevice[], target: DeviceTarget): SpotifyDevi
 
 export async function POST(request: NextRequest) {
   try {
-    const { query, target = "default" } = (await request.json()) as {
+    const { query, target = "default", deviceId } = (await request.json()) as {
       query: string;
       target?: DeviceTarget;
+      deviceId?: string;
     };
 
     if (!query) {
@@ -69,7 +79,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const device = pickDevice(devices, target as DeviceTarget);
+    // Use explicit deviceId if provided, otherwise pick by target type
+    const device = deviceId
+      ? (devices.find((d) => d.id === deviceId) ?? pickDevice(devices, target as DeviceTarget))
+      : pickDevice(devices, target as DeviceTarget);
 
     if (!device) {
       const available = devices.map((d) => `${d.name} (${d.type})`).join(", ");
@@ -102,6 +115,14 @@ export async function POST(request: NextRequest) {
         { status: playRes.status }
       );
     }
+
+    savePlay({
+      track_name: track.name,
+      artist: track.artists[0]?.name ?? "",
+      spotify_uri: track.uri ?? null,
+      device_name: device.name,
+      device_type: device.type,
+    });
 
     return NextResponse.json({
       ok: true,
