@@ -1,68 +1,69 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getValidAccessToken } from "../tokens";
 import { savePlay } from "@/lib/db";
-
-type DeviceTarget = "default" | "pc" | "mac" | "phone" | "tv";
-
-interface SpotifyDevice {
-  id: string;
-  name: string;
-  type: string;
-  is_active: boolean;
-}
-
-const isMac = (d: SpotifyDevice) =>
-  d.type === "Computer" && /mac|macbook|imac|mac\s*mini|mac\s*pro|mac\s*studio/i.test(d.name);
-
-const isPC = (d: SpotifyDevice) =>
-  d.type === "Computer" && !/mac|macbook|imac/i.test(d.name);
-
-function pickDevice(devices: SpotifyDevice[], target: DeviceTarget): SpotifyDevice | null {
-  switch (target) {
-    case "mac":
-      return devices.find(isMac) ?? devices.find((d) => d.type === "Computer") ?? null;
-    case "pc":
-      return devices.find(isPC) ?? devices.find((d) => d.type === "Computer") ?? null;
-    case "phone":
-      return devices.find((d) => d.type === "Smartphone") ?? null;
-    case "tv":
-      return (
-        devices.find((d) => d.type === "TV") ??
-        devices.find((d) => /samsung|smart\s*tv|pantalla|television/i.test(d.name)) ??
-        null
-      );
-    default:
-      return devices.find((d) => d.is_active) ?? devices[0] ?? null;
-  }
-}
+import {
+  DeviceTarget,
+  SpotifyDevice,
+  Track,
+  pickDevice,
+  mapTrack,
+  searchTracks,
+} from "@/lib/spotify";
 
 export async function POST(request: NextRequest) {
   try {
-    const { query, target = "default", deviceId } = (await request.json()) as {
-      query: string;
+    const {
+      query,
+      uri,
+      name,
+      artist,
+      target = "default",
+      deviceId,
+    } = (await request.json()) as {
+      query?: string;
+      uri?: string;
+      name?: string;
+      artist?: string;
       target?: DeviceTarget;
       deviceId?: string;
     };
 
-    if (!query) {
-      return NextResponse.json({ error: "Query requerida" }, { status: 400 });
+    if (!query && !uri) {
+      return NextResponse.json({ error: "Falta query o uri" }, { status: 400 });
     }
 
     const token = await getValidAccessToken();
 
-    // 1. Search for track
-    const searchRes = await fetch(
-      `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=1`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    const searchData = await searchRes.json();
-    const track = searchData.tracks?.items?.[0];
+    // Pista a reproducir + alternativas (para "¿no era esa?").
+    let track: Track;
+    let alternatives: Track[] = [];
 
-    if (!track) {
-      return NextResponse.json({ error: "No se encontró la canción" }, { status: 404 });
+    if (uri) {
+      // El usuario eligió una sugerencia: reproducimos esa pista directamente.
+      track = { uri, name: name ?? "", artist: artist ?? "", image: null };
+    } else {
+      // 1. Buscamos varias coincidencias para la consulta de voz.
+      let items = await searchTracks(token, query as string, 6);
+
+      // Fallback: si no hubo resultados, reintentamos con una consulta relajada
+      // (primeras palabras), por si la transcripción de voz fue imperfecta.
+      if (items.length === 0) {
+        const relaxed = (query as string).split(/\s+/).slice(0, 2).join(" ").trim();
+        if (relaxed && relaxed !== query) items = await searchTracks(token, relaxed, 6);
+      }
+
+      if (items.length === 0) {
+        return NextResponse.json(
+          { error: "No se encontró la canción", suggestions: [] as Track[] },
+          { status: 404 }
+        );
+      }
+
+      track = mapTrack(items[0]);
+      alternatives = items.slice(1).map(mapTrack);
     }
 
-    // 2. Get available devices
+    // 2. Dispositivos disponibles.
     const devicesRes = await fetch("https://api.spotify.com/v1/me/player/devices", {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -73,13 +74,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: "No hay dispositivos Spotify activos. Abre Spotify en algún dispositivo primero.",
-          track: { name: track.name, artist: track.artists[0]?.name ?? "" },
+          track,
+          alternatives,
         },
         { status: 409 }
       );
     }
 
-    // Use explicit deviceId if provided, otherwise pick by target type
     const device = deviceId
       ? (devices.find((d) => d.id === deviceId) ?? pickDevice(devices, target as DeviceTarget))
       : pickDevice(devices, target as DeviceTarget);
@@ -87,15 +88,12 @@ export async function POST(request: NextRequest) {
     if (!device) {
       const available = devices.map((d) => `${d.name} (${d.type})`).join(", ");
       return NextResponse.json(
-        {
-          error: `Dispositivo no encontrado. Disponibles: ${available}`,
-          track: { name: track.name, artist: track.artists[0]?.name ?? "" },
-        },
+        { error: `Dispositivo no encontrado. Disponibles: ${available}`, track, alternatives },
         { status: 409 }
       );
     }
 
-    // 3. Start playback on target device
+    // 3. Iniciamos la reproducción en el dispositivo elegido.
     const playRes = await fetch(
       `https://api.spotify.com/v1/me/player/play?device_id=${device.id}`,
       {
@@ -111,14 +109,14 @@ export async function POST(request: NextRequest) {
     if (!playRes.ok && playRes.status !== 204) {
       const errData = await playRes.json().catch(() => ({}));
       return NextResponse.json(
-        { error: errData?.error?.message ?? "No se pudo iniciar la reproducción" },
+        { error: errData?.error?.message ?? "No se pudo iniciar la reproducción", track, alternatives },
         { status: playRes.status }
       );
     }
 
     savePlay({
       track_name: track.name,
-      artist: track.artists[0]?.name ?? "",
+      artist: track.artist,
       spotify_uri: track.uri ?? null,
       device_name: device.name,
       device_type: device.type,
@@ -126,7 +124,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      track: { name: track.name, artist: track.artists[0]?.name ?? "" },
+      track,
+      alternatives,
       device: { name: device.name, type: device.type },
     });
   } catch (err) {

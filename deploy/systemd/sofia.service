@@ -1,0 +1,35 @@
+# Servicio systemd para la app de voz "Sofia".
+#
+# Instalación (lo hace deploy/setup.sh, o manual):
+#   sudo cp deploy/systemd/sofia.service /etc/systemd/system/sofia.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now sofia
+#
+# Ver logs:   journalctl -u sofia -f
+# Reiniciar:  sudo systemctl restart sofia
+#
+# NOTA: node está instalado vía nvm, así que ExecStart usa rutas absolutas y llama
+# al binario de next directamente (no vía npm, que no propaga SIGTERM y dejaría
+# procesos huérfanos al parar). Si actualizas node con nvm, vuelve a correr
+# setup.sh (regenera estas rutas) o edita ExecStart.
+
+[Unit]
+Description=Sofia Voice AI App (Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=edmorua
+WorkingDirectory=/home/edmorua/projects/voice-ai-app
+Environment=NODE_ENV=production
+# next start carga automáticamente .env.local desde WorkingDirectory.
+# (setup.sh reescribe esta línea con las rutas reales de node/next.)
+ExecStart=/home/edmorua/.nvm/versions/node/v24.15.0/bin/node /home/edmorua/projects/voice-ai-app/node_modules/next/dist/bin/next start -p 3030 -H 127.0.0.1
+Restart=on-failure
+RestartSec=5
+# Reinicia también si el proceso queda sin responder al arrancar.
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

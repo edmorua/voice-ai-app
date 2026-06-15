@@ -20,9 +20,9 @@ export async function POST(request: NextRequest) {
     });
 
     if (!res.ok && res.status !== 204) {
-      const err = await res.json().catch(() => ({}));
+      const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
       return NextResponse.json(
-        { error: (err as any)?.error?.message ?? "No se pudo transferir la reproducción" },
+        { error: err?.error?.message ?? "No se pudo transferir la reproducción" },
         { status: res.status }
       );
     }

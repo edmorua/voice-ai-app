@@ -19,7 +19,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
-      <body className={`${geist.variable} antialiased font-[var(--font-geist)]`}>
+      <body className={`${geist.variable} antialiased`}>
         {children}
       </body>
     </html>

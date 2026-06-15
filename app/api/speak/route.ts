@@ -7,11 +7,16 @@ import path from "path";
 // a ElevenLabs cuando el texto se repite (ej. "Generando", "Procesando", saludo).
 const CACHE_DIR = path.join(process.cwd(), ".tts-cache");
 
+// Voz limpia, cálida, alegre y un punto seductora:
+// - stability media-alta = entrega clara y consistente (limpia)
+// - similarity_boost alto = timbre nítido y fiel
+// - style expresivo = matiz alegre y sensual sin perder claridad
 const VOICE_SETTINGS = {
-  stability: 0.5,
-  similarity_boost: 0.75,
-  style: 0.2,
+  stability: 0.32,
+  similarity_boost: 0.9,
+  style: 0.72,
   use_speaker_boost: true,
+  speed: 1.1,
 };
 
 function cacheKey(text: string, voiceId: string): string {
